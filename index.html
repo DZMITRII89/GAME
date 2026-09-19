@@ -2,17 +2,40 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0c0a08">
 <title>Кошка Домой — ретро 8-бит платформер</title>
 <style>
   :root{
     --bezel1:#3c3630;
     --bezel2:#141210;
+    /* Ширина игрового поля (соотношение сторон 3:2): минимум из 900px,
+       доступной ширины и доступной высоты экрана — игра всегда целиком
+       помещается и на десктопе, и на смартфоне. */
+    --tv-pad-x:28px;      /* боковой отступ рамки «телевизора» */
+    --tv-pad-top:28px;
+    --tv-pad-bottom:46px;
+    --h-reserve:96px;     /* горизонтальный запас: рамка + поля страницы */
+    --v-reserve:210px;    /* вертикальный запас: рамка + подсказка под игрой */
+    --cw:min(900px, calc(100vw - var(--h-reserve)), calc((100vh - var(--v-reserve)) * 1.5));
+    --btn:clamp(40px, calc(var(--cw) * .085), 62px);
   }
+  @supports (height:100dvh){
+    :root{
+      --cw:min(900px, calc(100vw - var(--h-reserve)), calc((100dvh - var(--v-reserve)) * 1.5));
+    }
+  }
+  *{ box-sizing:border-box; }
   html,body{
     margin:0;
     padding:0;
     min-height:100vh;
+    min-height:100dvh;
+    -webkit-text-size-adjust:100%;
+    text-size-adjust:100%;
+    touch-action:manipulation;
     background:radial-gradient(circle at 50% 30%, #2b2620, #0c0a08 75%);
     display:flex;
     flex-direction:column;
@@ -24,7 +47,7 @@
     position:relative;
     background:linear-gradient(160deg, var(--bezel1), var(--bezel2) 80%);
     border-radius:34px;
-    padding:28px 28px 46px 28px;
+    padding:var(--tv-pad-top) var(--tv-pad-x) var(--tv-pad-bottom) var(--tv-pad-x);
     box-shadow:
       0 24px 70px rgba(0,0,0,.65),
       inset 0 0 0 3px #050505,
@@ -48,6 +71,8 @@
   }
   canvas{
     display:block;
+    width:var(--cw);
+    height:calc(var(--cw) / 1.5);
     background:#000;
     image-rendering:pixelated;
     image-rendering:crisp-edges;
@@ -102,31 +127,77 @@
   }
   .touch-side{
     position:absolute;
-    bottom:16px;
+    bottom:calc(var(--cw) * .018);
     display:flex;
-    gap:14px;
+    gap:calc(var(--cw) * .016);
   }
-  .touch-left{ left:16px; }
-  .touch-right{ right:16px; }
+  .touch-left{ left:calc(var(--cw) * .018); }
+  .touch-right{ right:calc(var(--cw) * .018); }
   .touch-btn{
     pointer-events:auto;
-    width:62px; height:62px;
+    width:var(--btn); height:var(--btn);
     border-radius:14px;
     border:2px solid rgba(255,255,255,.4);
     background:rgba(20,17,13,.5);
     color:#fdf6e3;
-    font-size:24px;
+    font-size:calc(var(--btn) * .4);
     line-height:1;
+    padding:0;
     display:flex; align-items:center; justify-content:center;
     -webkit-tap-highlight-color: transparent;
     user-select:none;
     touch-action:none;
   }
   .touch-btn:active{ background:rgba(255,255,255,.28); }
-  .touch-btn-jump{ width:74px; height:74px; font-size:28px; }
+  .touch-btn-jump{ width:calc(var(--btn) * 1.2); height:calc(var(--btn) * 1.2); font-size:calc(var(--btn) * .48); }
 
   @media (pointer: coarse){
     .touch-controls{ display:block; }
+  }
+
+  /* ===== Смартфоны и планшеты: игра целиком на экране, без прокрутки ===== */
+  @media (pointer: coarse), (max-width: 700px){
+    :root{
+      --tv-pad-x:6px;
+      --tv-pad-top:6px;
+      --tv-pad-bottom:6px;
+      --h-reserve:12px;
+      --v-reserve:12px;
+    }
+    html,body{
+      height:100vh;
+      height:100dvh;
+      overflow:hidden;
+      overscroll-behavior:none;
+      -webkit-user-select:none;
+      user-select:none;
+      -webkit-touch-callout:none;
+    }
+    body{
+      padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    .tv{ border-radius:14px; }
+    .tv::before, .brand, .knobs, .hint{ display:none; }
+    .screen-wrap{ border-radius:10px; }
+    .vignette{ border-radius:10px; box-shadow:inset 0 0 40px rgba(0,0,0,.5); }
+  }
+
+  /* Портрет: кнопки лежат под игровым полем, а не поверх него —
+     не закрывают картинку и остаются достаточно крупными. */
+  @media (pointer: coarse) and (orientation: portrait){
+    :root{
+      --v-reserve:130px;
+      --btn:64px;
+    }
+    .screen-wrap{ background:#0c0a08; }
+    .touch-controls{
+      position:static;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:12px 10px 6px;
+    }
+    .touch-side{ position:static; }
   }
 </style>
 </head>
@@ -150,8 +221,8 @@
     <div class="knobs"><div class="knob"></div><div class="knob"></div></div>
   </div>
   <p class="hint">
-    <b>← →</b> движение &nbsp; <b>↑ / Пробел</b> прыжок &nbsp; <b>Enter</b> старт / рестарт<br>
-    На телефоне доступны сенсорные кнопки прямо на экране игры.<br>
+    <b>← →</b> движение &nbsp; <b>↑ / Пробел</b> прыжок &nbsp; <b>Enter</b> или <b>↑</b> старт / рестарт<br>
+    На телефоне: виртуальные кнопки ◀ ▶ ▲ — игру запускает кнопка ▲.<br>
     Уровень 1: улица — прыгай по ящикам и машинам, лови мышей, избегай собак.<br>
     Уровень 2: деревья — прыгай по веткам к открытому окну, лови птичек, избегай хищных птиц.
   </p>
@@ -188,12 +259,17 @@ window.addEventListener('blur', function(){
 });
 
 canvas.addEventListener('mousedown', function(){ canvas.focus(); unlockAudio(); });
+// Safari на iOS игнорирует user-scalable=no — гасим жесты масштабирования вручную.
+['gesturestart','gesturechange','gestureend'].forEach(function(ev){
+  document.addEventListener(ev, function(e){ e.preventDefault(); });
+});
+document.addEventListener('touchmove', function(e){ e.preventDefault(); }, {passive:false});
 
 function justPressed(code){ return !!keys[code] && !prevKeys[code]; }
 
 /* ============================= СЕНСОРНЫЕ КНОПКИ =============================
-   Кнопка прыжка шлёт 'Space' — этот же код уже используется и для прыжка в
-   игре, и как подтверждение на стартовом/финальном экранах, так что на
+   Кнопка ▲ шлёт 'ArrowUp' — этот же код используется и для прыжка в игре,
+   и как подтверждение (Enter / ↑) на стартовом/финальном экранах, так что на
    телефоне можно и играть, и стартовать/рестартовать всего тремя кнопками. */
 function bindTouchButton(el, code){
   if(!el) return;
@@ -208,7 +284,7 @@ function bindTouchButton(el, code){
 }
 bindTouchButton(document.getElementById('btnLeft'), 'ArrowLeft');
 bindTouchButton(document.getElementById('btnRight'), 'ArrowRight');
-bindTouchButton(document.getElementById('btnJump'), 'Space');
+bindTouchButton(document.getElementById('btnJump'), 'ArrowUp');
 
 /* ============================= AUDIO =============================
    Простые чиптюн-бипы через Web Audio API, без внешних файлов. */
@@ -751,7 +827,7 @@ function update(){
   if(state === 'START'){
     if(!firstGestureConsumed){
       if(audioUnlocked) firstGestureConsumed = true;
-    } else if(justPressed('Enter') || justPressed('Space')){
+    } else if(justPressed('Enter') || justPressed('ArrowUp') || justPressed('Space')){
       startGame();
     }
     bgAnim++;
@@ -762,10 +838,10 @@ function update(){
   } else if(state === 'WIN'){
     winTimer++;
     bgAnim++;
-    if(justPressed('Enter') || justPressed('Space')) startGame();
+    if(justPressed('Enter') || justPressed('ArrowUp') || justPressed('Space')) startGame();
   } else if(state === 'GAMEOVER'){
     bgAnim++;
-    if(justPressed('Enter') || justPressed('Space')) startGame();
+    if(justPressed('Enter') || justPressed('ArrowUp') || justPressed('Space')) startGame();
   }
 }
 
@@ -1194,15 +1270,18 @@ function renderStart(){
   ctx.font = 'bold 54px "Courier New", monospace';
   ctx.fillText('SUPER BUSYA', W/2, 170);
 
-  ctx.font = '16px "Courier New", monospace';
+  ctx.font = '18px "Courier New", monospace';
   ctx.fillStyle = '#fdf6e3';
-  ctx.fillText('← → движение   ↑ / Пробел прыжок', W/2, 460);
-  ctx.fillText('Собирай мышей и птичек, избегай собак и хищных птиц', W/2, 484);
+  ctx.fillText('← → движение   ↑ / Пробел прыжок', W/2, 440);
+  ctx.fillText('Собирай мышей и птичек, избегай собак и хищных птиц', W/2, 466);
+  ctx.font = 'bold 18px "Courier New", monospace';
+  ctx.fillStyle = '#bfe6ff';
+  ctx.fillText('С виртуальными клавишами: жми кнопку ▲ на экране', W/2, 500);
 
   if(Math.floor(bgAnim/24)%2===0){
-    ctx.font = 'bold 22px "Courier New", monospace';
+    ctx.font = 'bold 24px "Courier New", monospace';
     ctx.fillStyle = '#ffd23f';
-    ctx.fillText('ENTER — НАЧАТЬ ИГРУ', W/2, 540);
+    ctx.fillText('ENTER или ↑ — НАЧАТЬ ИГРУ', W/2, 552);
   }
   ctx.textAlign = 'left';
 }
@@ -1251,7 +1330,7 @@ function renderWin(){
   circle(tapBaseX-16, tapBaseY-40, 7, '#3f7fd6');
   const spoutX = tapBaseX + 66, spoutY = tapBaseY - 54;
 
-  // ==== крупная серая кошка сидит под краном и пьёт ====
+  // ==== крупная Буся сидит под краном и пьёт ====
   const bob = Math.sin(winTimer*0.12) * 3;
   const scale = 2.7;
   const feetX = spoutX + 35;
@@ -1283,19 +1362,19 @@ function renderWin(){
   ctx.font = 'bold 30px "Courier New", monospace';
   ctx.fillText('МЯУ! ДОМА ХОРОШО', W/2, 36);
 
-  rect(W/2-220, 440, 440, 46, 'rgba(20,16,8,0.3)');
+  rect(W/2-300, 440, 600, 46, 'rgba(20,16,8,0.3)');
   ctx.fillStyle = '#fdf6e3';
   ctx.font = '16px "Courier New", monospace';
-  ctx.fillText('Серая кошка добралась до раковины и пьёт воду из-под крана', W/2, 462);
+  ctx.fillText('Буся добралась до раковины и пьёт воду из-под крана', W/2, 462);
   ctx.font = 'bold 18px "Courier New", monospace';
   ctx.fillStyle = '#ffd23f';
   ctx.fillText('СЧЁТ: ' + score, W/2, 483);
 
   if(Math.floor(winTimer/24)%2===0){
-    rect(W/2-160, 552, 320, 30, 'rgba(20,16,8,0.35)');
+    rect(W/2-200, 552, 400, 30, 'rgba(20,16,8,0.35)');
     ctx.fillStyle = '#ff8a3d';
     ctx.font = 'bold 18px "Courier New", monospace';
-    ctx.fillText('ENTER — ИГРАТЬ СНОВА', W/2, 573);
+    ctx.fillText('ENTER или ↑ — ИГРАТЬ СНОВА', W/2, 573);
   }
   ctx.textAlign = 'left';
 }
@@ -1313,7 +1392,7 @@ function renderGameOver(){
   if(Math.floor(bgAnim/24)%2===0){
     ctx.fillStyle = '#e0c040';
     ctx.font = 'bold 18px "Courier New", monospace';
-    ctx.fillText('ENTER — ПОПРОБОВАТЬ СНОВА', W/2, H/2+50);
+    ctx.fillText('ENTER или ↑ — ПОПРОБОВАТЬ СНОВА', W/2, H/2+50);
   }
   ctx.textAlign = 'left';
 }
