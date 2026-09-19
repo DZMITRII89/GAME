@@ -20,7 +20,7 @@
     --h-reserve:96px;     /* горизонтальный запас: рамка + поля страницы */
     --v-reserve:210px;    /* вертикальный запас: рамка + подсказка под игрой */
     --cw:min(900px, calc(100vw - var(--h-reserve)), calc((100vh - var(--v-reserve)) * 1.5));
-    --btn:clamp(40px, calc(var(--cw) * .085), 62px);
+    --btn:clamp(60px, calc(var(--cw) * .128), 93px);   /* было 40–62px: +50% */
   }
   @supports (height:100dvh){
     :root{
@@ -129,7 +129,7 @@
     position:absolute;
     bottom:calc(var(--cw) * .018);
     display:flex;
-    gap:calc(var(--cw) * .016);
+    gap:calc(var(--btn) * .55);   /* стрелки ◀ ▶ разнесены подальше друг от друга */
   }
   .touch-left{ left:calc(var(--cw) * .018); }
   .touch-right{ right:calc(var(--cw) * .018); }
@@ -186,8 +186,8 @@
      не закрывают картинку и остаются достаточно крупными. */
   @media (pointer: coarse) and (orientation: portrait){
     :root{
-      --v-reserve:130px;
-      --btn:64px;
+      --v-reserve:170px;
+      --btn:min(96px, calc((100vw - 48px) / 3.75));
     }
     .screen-wrap{ background:#0c0a08; }
     .touch-controls{
@@ -233,7 +233,7 @@
 
 /* ============================= SETUP ============================= */
 const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
+let ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 const W = canvas.width, H = canvas.height;
 
@@ -421,6 +421,14 @@ const MAX_HEARTS = 5;
 const INV_TIME = 80;
 const ITEMS_PER_LIFE = 10;
 
+// Все игровые объекты выводятся крупнее на 30% (на смартфоне мелкие детали
+// плохо видны). Физика и размеры в мире не меняются — увеличивается только
+// «камера»: в кадр попадает область VW×VH мировых единиц вместо W×H.
+const ZOOM = 1.3;
+const VW = W / ZOOM;
+const VH = H / ZOOM;
+const MAX_CAM_Y = H - VH;   // нижний край кадра всегда совпадает с низом мира (y=600)
+
 /* ============================= GAME STATE ============================= */
 let state = 'START'; // START | LEVEL1 | LEVEL2 | WIN | GAMEOVER
 let score = 0;
@@ -443,12 +451,14 @@ const player = {
 
 // Размеры остальных персонажей (увеличены пропорционально кошке).
 const DOG_W = 48, DOG_H = 40;
+const CAR_W = 96, CAR_H = 50;   // едущая машина в конце первого уровня
 const HAWK_W = 48, HAWK_H = 32;
 const MOUSE_W = 22, MOUSE_H = 17;
 const BIRD_W = 20, BIRD_H = 17;
 
 /* ============================= LEVEL 1: УЛИЦА ============================= */
-const LEVEL1_WIDTH = 6600;
+const LEVEL1_PLAY_END = 6600;              // до этой отметки идут ящики, кусты, машины и собаки
+const LEVEL1_WIDTH = 7300;                 // после неё — длинная пустая дорога до финиша
 const GROUND_TOP = 520;
 
 function buildLevel1(){
@@ -463,18 +473,18 @@ function buildLevel1(){
   // могла запрыгнуть (максимум 88px при высоте прыжка ~120px).
   const templates = [
     [{dx:0, w:46, h:46, type:'crate'}],
-    [{dx:0, w:46, h:80, type:'crate'}],
+    [{dx:0, w:64, h:66, type:'bush'}],
     [{dx:0, w:115, h:58, type:'car'}],
-    [{dx:0, w:46, h:50, type:'crate'}, {dx:58, w:46, h:50, type:'crate'}],
+    [{dx:0, w:60, h:52, type:'bush'}, {dx:72, w:46, h:50, type:'crate'}],
     [{dx:0, w:120, h:58, type:'car'}],
-    [{dx:0, w:56, h:88, type:'crate'}, {dx:66, w:46, h:46, type:'crate'}],
+    [{dx:0, w:56, h:88, type:'crate'}, {dx:66, w:58, h:46, type:'bush'}],
     [{dx:0, w:105, h:52, type:'car'}]
   ];
 
   let x = 340;
   let t = 0;
-  while(x < LEVEL1_WIDTH - 380){
-    const progress = x / LEVEL1_WIDTH;
+  while(x < LEVEL1_PLAY_END - 380){
+    const progress = x / LEVEL1_PLAY_END;
     // ближе к концу уровня машины перекрашиваются — наглядный сигнал роста сложности
     const carVariant = progress < 0.33 ? 0 : (progress < 0.66 ? 1 : 2);
     const cluster = templates[t % templates.length];
@@ -523,6 +533,20 @@ function buildLevel1(){
     x = gapStart + gapWidth;
     t++;
   }
+
+  // В самом конце уровня вместо последней собаки — едущая машина. Ей отдан
+  // длинный участок пустой дороги перед финишем: она катит навстречу кошке,
+  // у начала участка быстро пятится обратно за пределы экрана и возвращается.
+  for(let i = enemies.length - 1; i >= 0; i--){
+    if(enemies[i].kind === 'dog'){ enemies.splice(i, 1); break; }
+  }
+  const roadStart = x;                          // конец последнего промежутка = начало пустой дороги
+  const carOffX = LEVEL1_WIDTH + 120;           // за правым краем уровня — гарантированно вне экрана
+  enemies.push({
+    kind:'car', x:carOffX, y:GROUND_TOP-CAR_H, w:CAR_W, h:CAR_H,
+    minX:roadStart, offX:carOffX, activateX:roadStart - 260,
+    vx:0, phase:'wait', wait:0, face:-1
+  });
 
   const goal = {x:LEVEL1_WIDTH-120, y:GROUND_TOP-230, w:90, h:230};
 
@@ -677,6 +701,42 @@ function updatePatrol(e){
   if(e.kind === 'hawk'){ e.wing = (e.wing+1) % 30; }
 }
 
+// Машина на финишной дороге: катит влево навстречу кошке (медленно), у начала
+// участка быстро пятится вправо за край уровня, там пережидает и возвращается.
+// Включается, когда кошка подходит к дороге.
+const ROAD_CAR_SPEED = 2.6;
+const ROAD_CAR_BACK_SPEED = 9;
+function updateRoadCar(e){
+  if(e.phase === 'wait'){
+    if(player.x < e.activateX) return;
+    if(--e.wait > 0) return;
+    e.phase = 'in';
+  }
+  if(e.phase === 'in'){
+    e.vx = -ROAD_CAR_SPEED;
+    e.x += e.vx;
+    if(e.x <= e.minX){ e.x = e.minX; e.phase = 'back'; }
+  } else if(e.phase === 'back'){
+    e.vx = ROAD_CAR_BACK_SPEED;
+    e.x += e.vx;
+    if(e.x >= e.offX){ e.x = e.offX; e.vx = 0; e.phase = 'wait'; e.wait = 90; }
+  }
+}
+// Сверху на машину можно безопасно приземлиться — она работает как движущаяся
+// платформа (кошка едет вместе с ней). Боковой удар отнимает жизнь, как от собаки.
+function handleRoadCarContact(e){
+  if(!overlap(player, e)) return;
+  const prevBottom = player.y + player.h - player.vy;
+  if(player.vy >= 0 && prevBottom <= e.y + 8){
+    player.y = e.y - player.h;
+    player.vy = 0;
+    player.onGround = true;
+    player.x = clamp(player.x + e.vx, 0, currentLevel.width - player.w);
+  } else if(invTimer <= 0){
+    damagePlayer(e.x + e.w/2);
+  }
+}
+
 function damagePlayer(sourceX){
   if(invTimer > 0) return;
   hearts -= 1;
@@ -713,7 +773,7 @@ function loadLevel1(){
   player.y = currentLevel.startY;
   player.vx = 0; player.vy = 0; player.facing = 1;
   invTimer = 50;
-  camX = 0; camY = 0;
+  camX = 0; camY = MAX_CAM_Y;
 }
 function loadLevel2(){
   currentLevel = buildLevel2();
@@ -721,7 +781,7 @@ function loadLevel2(){
   player.y = currentLevel.startY;
   player.vx = 0; player.vy = 0; player.facing = 1;
   invTimer = 50;
-  camX = 0; camY = 0;
+  camX = 0; camY = MAX_CAM_Y;
   sfxCollect();
 }
 
@@ -757,10 +817,15 @@ function updateLevel1(){
   player.x = clamp(player.x, 0, currentLevel.width - player.w);
   updateWalkAnim();
 
-  camX = clamp(player.x + player.w/2 - W/2, 0, Math.max(0, currentLevel.width - W));
-  camY = 0;
+  camX = clamp(player.x + player.w/2 - VW/2, 0, Math.max(0, currentLevel.width - VW));
+  camY = MAX_CAM_Y;
 
   for(const d of currentLevel.enemies){
+    if(d.kind === 'car'){
+      updateRoadCar(d);
+      handleRoadCarContact(d);
+      continue;
+    }
     updatePatrol(d);
     if(invTimer <= 0 && overlap(player, d)) damagePlayer(d.x + d.w/2);
   }
@@ -791,8 +856,10 @@ function updateLevel2(){
   player.x = clamp(player.x, 0, currentLevel.width - player.w);
   updateWalkAnim();
 
-  camX = clamp(player.x + player.w/2 - W/2, 0, Math.max(0, currentLevel.width - W));
-  camY = 0;
+  camX = clamp(player.x + player.w/2 - VW/2, 0, Math.max(0, currentLevel.width - VW));
+  // в лесу кадр плавно следует за кошкой по высоте — деревья и окно выше кадра
+  const camTargetY = clamp(player.y + player.h/2 - VH*0.6, 0, MAX_CAM_Y);
+  camY += (camTargetY - camY) * 0.1;
 
   for(const en of currentLevel.enemies){
     updatePatrol(en);
@@ -960,6 +1027,27 @@ function drawBird(sx, sy, wing){
   u(0,3,1,1,blue);
 }
 
+// Куст: плотная зелёная масса с плоской верхушкой (на неё запрыгивает кошка),
+// несколькими слоями листвы и мелкими цветочками.
+function drawBush(sx,sy,w,h){
+  rect(sx+2, sy+4, w-4, h-4, '#2f6a2c');                        // тёмное основание
+  circle(sx+w*0.18, sy+h*0.55, h*0.42, '#3f7a34');
+  circle(sx+w*0.5,  sy+h*0.45, h*0.5,  '#4c8a3a');
+  circle(sx+w*0.82, sy+h*0.55, h*0.42, '#3f7a34');
+  rect(sx+w*0.12, sy+2, w*0.76, 8, '#5aa347');                    // ровная верхушка
+  circle(sx+w*0.3,  sy+h*0.32, h*0.26, '#5aa347');
+  circle(sx+w*0.68, sy+h*0.3,  h*0.28, '#67b352');
+  circle(sx+w*0.5,  sy+h*0.55, h*0.2,  '#7ec766');
+  circle(sx+w*0.24, sy+h*0.72, h*0.14, '#4c8a3a');
+  circle(sx+w*0.78, sy+h*0.74, h*0.14, '#3a6f31');
+  // цветочки
+  circle(sx+w*0.3,  sy+h*0.5,  2.5, '#f6a5c0');
+  circle(sx+w*0.66, sy+h*0.42, 2.5, '#ffe27a');
+  circle(sx+w*0.5,  sy+h*0.75, 2.5, '#f6a5c0');
+  circle(sx+w*0.85, sy+h*0.62, 2,   '#ffe27a');
+  rect(sx, sy+h-4, w, 4, '#24521f');                              // тень у земли
+}
+
 function drawCrate(sx,sy,w,h){
   rect(sx,sy,w,h,'#a9773f');
   rect(sx,sy,w,3,'#c99a5c');
@@ -1013,6 +1101,28 @@ function drawCar(sx,sy,w,h,variant){
   circle(sx+w*0.2, sy+h, 3, '#888');
   circle(sx+w*0.8, sy+h, 8, '#161616');
   circle(sx+w*0.8, sy+h, 3, '#888');
+}
+
+// Едущая машина (жёлтое такси): разворачивается по направлению движения,
+// слегка подпрыгивает на ходу, горят фары, сзади выхлоп.
+function drawMovingCar(e){
+  const dir = e.face || (e.vx < 0 ? -1 : 1);       // мордой всегда к кошке — назад машина пятится
+  const bounce = e.vx !== 0 ? Math.round(Math.sin(bgAnim*0.9)) : 0;
+  ctx.save();
+  ctx.translate(e.x + e.w/2, e.y + bounce);
+  ctx.scale(dir, 1);
+  ctx.translate(-e.w/2, 0);
+  drawCar(0, 0, e.w, e.h, 1);
+  // фара и свет перед машиной
+  rect(e.w-4, e.h*0.5, 5, 7, '#fff3b0');
+  ctx.fillStyle = 'rgba(255,243,176,.25)';
+  ctx.beginPath(); ctx.moveTo(e.w, e.h*0.5); ctx.lineTo(e.w+34, e.h*0.42); ctx.lineTo(e.w+34, e.h*0.9); ctx.lineTo(e.w, e.h*0.6); ctx.closePath(); ctx.fill();
+  rect(-1, e.h*0.5, 4, 7, '#e0403a');                // задний фонарь
+  // выхлоп сзади
+  const puff = (bgAnim % 24) / 24;
+  ctx.fillStyle = 'rgba(200,200,200,' + (0.55 - puff*0.5) + ')';
+  ctx.beginPath(); ctx.arc(-6 - puff*14, e.h - 8 - puff*6, 3 + puff*4, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
 }
 
 function drawBranch(sx,sy,w,h){
@@ -1105,26 +1215,256 @@ function drawCloud(x,y,scale){
   rect(x-16*scale, y, 70*scale, 14*scale, '#ffffff');
 }
 
+// Надпись в небе: остаётся на месте (не движется вместе с камерой) над всеми домами.
+function drawSkySign(text, fill, stroke){
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.lineJoin = 'round';
+  ctx.font = 'bold 48px "Courier New", monospace';
+  ctx.lineWidth = 9;
+  ctx.strokeStyle = 'rgba(0,0,0,.25)';
+  ctx.strokeText(text, W/2 + 3, 118 + 4);
+  ctx.strokeStyle = stroke;
+  ctx.strokeText(text, W/2, 118);
+  ctx.fillStyle = fill;
+  ctx.fillText(text, W/2, 118);
+  ctx.restore();
+}
+
+// Полоса городской застройки, которая повторяется по кругу: обычные дома,
+// периодически — малоэтажные магазины «Евроопт» и «Санта».
+// Дома чередуются по цветам: розовый, оранжевый, тёмный. Каждый пятый элемент —
+// магазин (по очереди «Евроопт» / «Санта»). Школа и ясли встречаются по одному
+// разу: полоса длиннее, чем весь путь параллакса за уровень (~4000px).
+const STREET_STRIP = (function(){
+  const HOUSE_COLORS = [
+    {col:'#e58aac', on:'#fff6c8', off:'#8f4a68', roof:'rgba(90,20,50,.28)'},   // розовый
+    {col:'#f0a04c', on:'#fff6c8', off:'#95582a', roof:'rgba(100,40,0,.28)'},   // оранжевый
+    {col:'#2c2740', on:'#fbe38a', off:'#171320', roof:'rgba(255,255,255,.08)'} // тёмный
+  ];
+  const HOUSE_W = [90, 64, 110, 80, 100, 70];
+  const HOUSE_H = [200, 150, 215, 175, 205, 140];
+  const SCHOOL_AT = 7, YASLI_AT = 17;
+  const items = [];
+  const GAP = 16;
+  let x = 0, slot = 0, houseN = 0, shopN = 0;
+  while(x < 4400){
+    let it;
+    if(slot === SCHOOL_AT){
+      it = {t:'school', w:210};
+    } else if(slot === YASLI_AT){
+      it = {t:'yasli', w:190};
+    } else if(slot % 5 === 4){
+      if(shopN % 2 === 0){
+        // «Евроопт»: зелёные буквы на тёмно-сером фоне
+        it = {t:'shop', w:250, name:'ЕВРООПТ', body:'#f1e3c0', sign:'#3b3f43', signText:'#3fd66b', trim:'#2f9b4f', awn1:'#2f9b4f', awn2:'#f4f8ee'};
+      } else {
+        // «Санта»: белые буквы на голубом фоне
+        it = {t:'shop', w:250, name:'САНТА', body:'#e6eef2', sign:'#4aa8e0', signText:'#ffffff', trim:'#ffffff', awn1:'#2f86c6', awn2:'#f4f8ee'};
+      }
+      shopN++;
+    } else {
+      const c = HOUSE_COLORS[houseN % 3];
+      it = {t:'house', w:HOUSE_W[houseN % 6], h:HOUSE_H[(houseN*5 + 1) % 6], col:c.col, on:c.on, off:c.off, roof:c.roof};
+      houseN++;
+    }
+    it.x = x;
+    items.push(it);
+    x += it.w + GAP;
+    slot++;
+  }
+  return { items: items, width: x };
+})();
+
+function drawStreetHouse(b, bx){
+  rect(bx, GROUND_TOP-b.h, b.w, b.h, b.col);
+  rect(bx, GROUND_TOP-b.h, b.w, 5, b.roof);
+  for(let wy=GROUND_TOP-b.h+14; wy<GROUND_TOP-10; wy+=22){
+    for(let wx=bx+10; wx<bx+b.w-10; wx+=20){
+      rect(wx, wy, 8, 10, ((wx+wy+bgAnim)%97<50) ? b.on : b.off);
+    }
+  }
+}
+
+// Школа: двухэтажное кирпичное здание с крыльцом, фронтоном и вывеской.
+function drawStreetSchool(b, bx){
+  const h = 148, top = GROUND_TOP - h;
+  rect(bx, top, b.w, h, '#d9b878');
+  for(let ry=top+4; ry<GROUND_TOP; ry+=8) rect(bx, ry, b.w, 1, 'rgba(120,80,30,.25)');   // кирпичная кладка
+  rect(bx-4, top-8, b.w+8, 10, '#8d3b2f');                                                  // крыша
+  rect(bx-4, top-8, b.w+8, 3, '#b45443');
+  // центральный входной блок с фронтоном
+  const cw = 70, cx = bx + b.w/2 - cw/2;
+  rect(cx, top-2, cw, h+2, '#eadcb4');
+  ctx.fillStyle = '#c9a866';
+  ctx.beginPath(); ctx.moveTo(cx-6, top-2); ctx.lineTo(cx+cw/2, top-24); ctx.lineTo(cx+cw+6, top-2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#eadcb4';
+  ctx.beginPath(); ctx.moveTo(cx+6, top-4); ctx.lineTo(cx+cw/2, top-19); ctx.lineTo(cx+cw-6, top-4); ctx.closePath(); ctx.fill();
+  // вывеска
+  rect(cx+6, top+8, cw-12, 24, '#1f3f7a');
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 19px "Courier New", monospace';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('ШКОЛА', cx+cw/2, top+26);
+  ctx.restore();
+  // дверь, колонны и ступени
+  rect(cx+cw/2-14, GROUND_TOP-46, 28, 42, '#6b4a2c');
+  rect(cx+cw/2-11, GROUND_TOP-43, 22, 36, '#8a5f3a');
+  rect(cx+cw/2-1, GROUND_TOP-43, 2, 36, '#5a3c22');
+  rect(cx+8, top+38, 5, h-42, '#f6efd6');
+  rect(cx+cw-13, top+38, 5, h-42, '#f6efd6');
+  rect(cx-6, GROUND_TOP-6, cw+12, 6, '#a9a394');
+  rect(cx-2, GROUND_TOP-11, cw+4, 5, '#bcb6a6');
+  // окна двух этажей по бокам
+  function win(wx, wy){
+    rect(wx-2, wy-2, 24, 26, '#f6efd6');
+    rect(wx, wy, 20, 22, ((wx+wy+bgAnim)%97<60) ? '#bfe3f2' : '#8fb5c7');
+    rect(wx+9, wy, 2, 22, '#f6efd6');
+    rect(wx, wy+10, 20, 2, '#f6efd6');
+  }
+  for(const wy of [top+18, top+84]){
+    win(bx+14, wy); win(bx+42, wy);
+    win(bx+b.w-14-20, wy); win(bx+b.w-42-20, wy);
+  }
+  rect(bx, GROUND_TOP-4, b.w, 4, '#9c9385');
+}
+
+// Ясли: невысокое яркое здание с двускатной крышей, разноцветной вывеской,
+// солнышком, круглыми окошками и заборчиком.
+function drawStreetYasli(b, bx){
+  const h = 108, top = GROUND_TOP - h;
+  rect(bx, top, b.w, h, '#b9e39c');
+  rect(bx, top, b.w, 4, 'rgba(255,255,255,.35)');
+  // двускатная крыша
+  ctx.fillStyle = '#e2603f';
+  ctx.beginPath(); ctx.moveTo(bx-8, top+2); ctx.lineTo(bx+b.w/2, top-34); ctx.lineTo(bx+b.w+8, top+2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#f08a5d';
+  ctx.beginPath(); ctx.moveTo(bx+6, top+2); ctx.lineTo(bx+b.w/2, top-26); ctx.lineTo(bx+b.w-6, top+2); ctx.closePath(); ctx.fill();
+  // вывеска с разноцветными буквами
+  const sw = 120, sxp = bx + b.w/2 - sw/2, sy = top + 6;
+  rect(sxp, sy, sw, 32, '#fff8e6');
+  rect(sxp, sy, sw, 3, '#f2c230'); rect(sxp, sy+29, sw, 3, '#f2c230');
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 26px "Courier New", monospace';
+  const letters = ['Я','С','Л','И'], cols = ['#e2483a','#2f86c6','#3aa35a','#e59a1f'];
+  for(let i=0;i<4;i++){
+    ctx.fillStyle = cols[i];
+    ctx.fillText(letters[i], sxp + 20 + i*27, sy+26);
+  }
+  ctx.restore();
+  // солнышко
+  circle(bx+22, top+24, 9, '#ffd23f');
+  ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2;
+  for(let a=0;a<8;a++){
+    const an = a*Math.PI/4;
+    ctx.beginPath(); ctx.moveTo(bx+22+Math.cos(an)*12, top+24+Math.sin(an)*12);
+    ctx.lineTo(bx+22+Math.cos(an)*17, top+24+Math.sin(an)*17); ctx.stroke();
+  }
+  // круглые окошки с занавесками и дверь с аркой
+  function round(cx, cy){
+    circle(cx, cy, 13, '#fff8e6');
+    circle(cx, cy, 10, ((cx+bgAnim)%97<60) ? '#bfe3f2' : '#8fb5c7');
+    rect(cx-1, cy-10, 2, 20, '#fff8e6'); rect(cx-10, cy-1, 20, 2, '#fff8e6');
+  }
+  round(bx+30, top+68); round(bx+b.w-30, top+68);
+  const dx = bx + b.w/2 - 16;
+  rect(dx-3, GROUND_TOP-50, 38, 50, '#fff8e6');
+  rect(dx, GROUND_TOP-47, 32, 47, '#e2483a');
+  circle(dx+16, GROUND_TOP-47, 16, '#e2483a');
+  rect(dx+15, GROUND_TOP-56, 2, 56, '#a83224');
+  circle(dx+26, GROUND_TOP-22, 2.5, '#ffd23f');
+  // цветочки под окнами
+  for(let fx=bx+12; fx<bx+b.w-10; fx+=22){
+    circle(fx, GROUND_TOP-8, 3, ((fx/22|0)%2) ? '#f08ab0' : '#ffd23f');
+    rect(fx-1, GROUND_TOP-6, 2, 5, '#3f8a3a');
+  }
+  // низкий штакетник
+  for(let fx=bx-4; fx<bx+b.w+4; fx+=9){
+    rect(fx, GROUND_TOP-16, 5, 16, '#fff8e6');
+    rect(fx, GROUND_TOP-18, 5, 3, '#e6ddc6');
+  }
+  rect(bx-4, GROUND_TOP-11, b.w+8, 3, '#e6ddc6');
+}
+
+// Малоэтажный магазин: плоская крыша, вывеска, витрина, дверь и полосатый козырёк.
+function drawStreetShop(b, bx){
+  const h = 118, top = GROUND_TOP - h;
+  rect(bx, top, b.w, h, b.body);
+  rect(bx-4, top-6, b.w+8, 8, '#8d857a');            // парапет крыши
+  rect(bx-4, top-6, b.w+8, 3, '#b9b1a4');
+  // вывеска
+  rect(bx+8, top+6, b.w-16, 34, b.sign);
+  rect(bx+8, top+6, b.w-16, 4, b.trim);
+  rect(bx+8, top+36, b.w-16, 4, b.trim);
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 26px "Courier New", monospace';
+  ctx.fillStyle = 'rgba(0,0,0,.3)';
+  ctx.fillText(b.name, bx+b.w/2+1, top+32);
+  ctx.fillStyle = b.signText;
+  ctx.fillText(b.name, bx+b.w/2, top+30);
+  ctx.restore();
+  // козырёк в полоску
+  const awnY = top+46;
+  const stripeW = 14;
+  for(let sx=0; sx<b.w-16; sx+=stripeW){
+    rect(bx+8+sx, awnY, stripeW, 12, ((sx/stripeW)%2===0) ? b.awn1 : b.awn2);
+  }
+  rect(bx+8, awnY+12, b.w-16, 3, 'rgba(0,0,0,.25)');
+  // витрины и дверь
+  const glassY = awnY+18, glassH = GROUND_TOP - glassY - 4;
+  const doorW = 40, doorX = bx + b.w/2 - doorW/2;
+  const leftW = doorX - (bx+14) - 8;
+  const rightX = doorX + doorW + 8;
+  const rightW = (bx+b.w-14) - rightX;
+  function glass(gx, gw){
+    rect(gx-2, glassY-2, gw+4, glassH+4, '#6a6459');
+    rect(gx, glassY, gw, glassH, '#a9d8ee');
+    rect(gx, glassY, gw, glassH*0.35, '#c8ebf7');
+    // блики
+    rect(gx+8, glassY+4, 6, glassH-8, 'rgba(255,255,255,.35)');
+    rect(gx+20, glassY+4, 3, glassH-8, 'rgba(255,255,255,.25)');
+    // товары на полке
+    rect(gx+4, glassY+glassH-18, gw-8, 3, '#7c6a4c');
+    for(let px=gx+8; px<gx+gw-14; px+=16) rect(px, glassY+glassH-32, 9, 14, (px%32<16)?'#d94f3a':'#e9b83b');
+  }
+  glass(bx+14, leftW);
+  glass(rightX, rightW);
+  rect(doorX-2, glassY-2, doorW+4, glassH+6, '#5a544a');
+  rect(doorX, glassY, doorW, glassH+2, '#7fb6d1');
+  rect(doorX+doorW/2-1, glassY, 2, glassH+2, '#5a544a');
+  rect(doorX+doorW/2-6, glassY+glassH/2, 3, 10, '#e8d9a8');
+  rect(doorX+doorW/2+3, glassY+glassH/2, 3, 10, '#e8d9a8');
+  rect(bx, GROUND_TOP-4, b.w, 4, '#9c9385');       // цоколь
+}
+
 function renderStreetBackground(){
   skyGradient('#7ec8e3', '#f2e2b0');
   const drift = (bgAnim*0.15) % (W+200);
   drawCloud(120 - drift%700, 70, 1);
   drawCloud(520 - drift%700, 50, 0.8);
   drawCloud(800 - (drift*0.6)%900, 100, 1.1);
-  const buildings = [
-    [40,260,90,'#2c2740'], [160,300,60,'#231e35'], [260,240,110,'#332c49'],
-    [420,280,80,'#2c2740'], [540,320,70,'#231e35'], [660,250,100,'#332c49'],
-    [810,290,90,'#2c2740']
-  ];
-  for(const b of buildings){
-    const bx = b[0], bh = b[1], bw = b[2], col = b[3];
-    rect(bx, GROUND_TOP-bh, bw, bh, col);
-    for(let wy=GROUND_TOP-bh+14; wy<GROUND_TOP-10; wy+=22){
-      for(let wx=bx+10; wx<bx+bw-10; wx+=20){
-        rect(wx, wy, 8, 10, ((wx+wy+bgAnim)%97<50) ? '#fbe38a' : '#171320');
-      }
+  drawSkySign('ОЛЬШАДЖЕЛЕС', '#fff6d8', '#2c2740');
+
+  // дальний план с параллаксом — тот же масштаб, что и у игрового мира
+  ctx.save();
+  ctx.scale(ZOOM, ZOOM);
+  ctx.translate(0, -camY);
+  const strip = STREET_STRIP;
+  const off = ((camX*0.5) % strip.width + strip.width) % strip.width;
+  for(let base = -off; base < VW; base += strip.width){
+    for(const b of strip.items){
+      const bx = base + b.x;
+      if(bx > VW || bx + b.w < 0) continue;
+      if(b.t === 'shop') drawStreetShop(b, bx);
+      else if(b.t === 'school') drawStreetSchool(b, bx);
+      else if(b.t === 'yasli') drawStreetYasli(b, bx);
+      else drawStreetHouse(b, bx);
     }
   }
+  ctx.restore();
 }
 
 function drawParallaxLayer(img, w, h, parallax, alpha){
@@ -1151,32 +1491,38 @@ function renderTreeBackground(){
 
 /* ============================= RENDER ============================= */
 function renderHUD(levelLabel){
+  // интерфейс чуть крупнее, чтобы читался на маленьком экране смартфона
+  const S = 1.25;
+  ctx.save();
+  ctx.scale(S, S);
+  const HW = W / S;
   for(let i=0;i<MAX_HEARTS;i++){
-    drawHeart(16 + i*22, 14, i < hearts);
+    drawHeart(12 + i*22, 10, i < hearts);
   }
   ctx.textAlign = 'left';
   ctx.font = '12px "Courier New", monospace';
   ctx.fillStyle = '#3a3226';
-  ctx.fillText('Собрано: ' + collected + '  (' + (collected % ITEMS_PER_LIFE) + '/' + ITEMS_PER_LIFE + ' до жизни)', 16, 42);
+  ctx.fillText('Собрано: ' + collected + '  (' + (collected % ITEMS_PER_LIFE) + '/' + ITEMS_PER_LIFE + ' до жизни)', 12, 38);
 
   ctx.fillStyle = '#2a2418';
   ctx.font = 'bold 18px "Courier New", monospace';
   ctx.textAlign = 'right';
-  ctx.fillText('SCORE ' + String(score).padStart(5,'0'), W-16, 30);
+  ctx.fillText('SCORE ' + String(score).padStart(5,'0'), HW-12, 24);
   ctx.textAlign = 'center';
   ctx.font = '13px "Courier New", monospace';
   ctx.fillStyle = '#3a3226';
-  ctx.fillText(levelLabel, W/2, 24);
+  ctx.fillText(levelLabel, HW/2, 46);
   ctx.textAlign = 'left';
+  ctx.restore();
 }
 
 function renderLevel1(){
   renderStreetBackground();
 
   // sidewalk / ground strip
-  rect(0, GROUND_TOP - camX*0, 0,0,'#000'); // no-op guard
   ctx.save();
-  ctx.translate(-camX, 0);
+  ctx.scale(ZOOM, ZOOM);
+  ctx.translate(-camX, -camY);
   rect(-200, GROUND_TOP, currentLevel.width+400, 200, '#6b6b6b');
   rect(-200, GROUND_TOP, currentLevel.width+400, 6, '#d8d8c8');
   for(let x=0; x<currentLevel.width; x+=60){
@@ -1187,10 +1533,14 @@ function renderLevel1(){
 
   for(const p of currentLevel.platforms){
     if(p.type === 'crate') drawCrate(p.x,p.y,p.w,p.h);
+    else if(p.type === 'bush') drawBush(p.x,p.y,p.w,p.h);
     else if(p.type === 'car') drawCar(p.x,p.y,p.w,p.h,p.variant);
   }
   for(const m of currentLevel.collectibles) drawMouse(m.x, m.y);
-  for(const d of currentLevel.enemies) drawDog(d.x, d.y, d.vx<0?-1:1, (bgAnim%20)<10);
+  for(const d of currentLevel.enemies){
+    if(d.kind === 'car') drawMovingCar(d);
+    else drawDog(d.x, d.y, d.vx<0?-1:1, (bgAnim%20)<10);
+  }
 
   const flash = invTimer>0 && (invTimer%10<5);
   drawCat(player.x, player.y, player.facing, player.walkFrame, !player.onGround, flash);
@@ -1201,9 +1551,11 @@ function renderLevel1(){
 
 function renderLevel2(){
   renderTreeBackground();
+  drawSkySign('ПАРК', '#fff0c2', '#3a2410');
 
   ctx.save();
-  ctx.translate(-camX, 0);
+  ctx.scale(ZOOM, ZOOM);
+  ctx.translate(-camX, -camY);
 
   rect(-200, GROUND_TOP2, currentLevel.width+400, 200, '#6b6b6b');
   rect(-200, GROUND_TOP2, currentLevel.width+400, 6, '#8fae5a');
@@ -1266,24 +1618,30 @@ function renderStart(){
   ctx.fillRect(0, 0, W, H);
 
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#fdf6e3';
-  ctx.font = 'bold 54px "Courier New", monospace';
-  ctx.fillText('SUPER BUSYA', W/2, 170);
+  outlineText('SUPER BUSYA', W/2, 150, 'bold 78px "Courier New", monospace', '#fdf6e3', '#1d1a10', 10);
 
-  ctx.font = '18px "Courier New", monospace';
-  ctx.fillStyle = '#fdf6e3';
-  ctx.fillText('← → движение   ↑ / Пробел прыжок', W/2, 440);
-  ctx.fillText('Собирай мышей и птичек, избегай собак и хищных птиц', W/2, 466);
-  ctx.font = 'bold 18px "Courier New", monospace';
-  ctx.fillStyle = '#bfe6ff';
-  ctx.fillText('С виртуальными клавишами: жми кнопку ▲ на экране', W/2, 500);
+  const f = '26px "Courier New", monospace';
+  outlineText('← → движение   ↑ / Пробел прыжок', W/2, 420, f, '#fdf6e3', '#1d1a10', 6);
+  outlineText('Собирай мышей и птичек, избегай собак и хищных птиц', W/2, 458, f, '#fdf6e3', '#1d1a10', 6);
+  outlineText('С виртуальными клавишами: жми кнопку ▲ на экране', W/2, 500, 'bold 26px "Courier New", monospace', '#bfe6ff', '#1d1a10', 6);
 
   if(Math.floor(bgAnim/24)%2===0){
-    ctx.font = 'bold 24px "Courier New", monospace';
-    ctx.fillStyle = '#ffd23f';
-    ctx.fillText('ENTER или ↑ — НАЧАТЬ ИГРУ', W/2, 552);
+    outlineText('ENTER или ↑ — НАЧАТЬ ИГРУ', W/2, 560, 'bold 36px "Courier New", monospace', '#ffd23f', '#1d1a10', 8);
   }
   ctx.textAlign = 'left';
+}
+
+// Крупный текст с тёмной обводкой — читается на любом фоне.
+function outlineText(str, x, y, font, fill, stroke, lw){
+  ctx.save();
+  ctx.font = font;
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = stroke;
+  ctx.strokeText(str, x, y);
+  ctx.fillStyle = fill;
+  ctx.fillText(str, x, y);
+  ctx.restore();
 }
 
 function renderWin(){
@@ -1293,12 +1651,12 @@ function renderWin(){
   for(let tx=0; tx<W; tx+=60) rect(tx, 0, 3, 400, '#d8c79a');
 
   // окно с дневным небом — контекст "дома"
-  rect(56, 46, 156, 128, '#8a5c34');
-  rect(68, 58, 132, 104, '#bdeeff');
-  circle(196, 86, 22, '#fff3b0');
-  drawCloud(96, 106, 0.55);
-  rect(68+64, 58, 4, 104, '#8a5c34');
-  rect(68, 58+50, 132, 4, '#8a5c34');
+  rect(56, 96, 156, 128, '#8a5c34');
+  rect(68, 108, 132, 104, '#bdeeff');
+  circle(186, 138, 22, '#fff3b0');
+  drawCloud(96, 156, 0.55);
+  rect(68+64, 108, 4, 104, '#8a5c34');
+  rect(68, 108+50, 132, 4, '#8a5c34');
 
   rect(0, 400, W, 200, '#c9a875');
   for(let tx=-20; tx<W; tx+=70) rect(tx, 400, 3, 200, '#b28f5f');
@@ -1312,7 +1670,7 @@ function renderWin(){
   rect(basinX-50, basinY+basinH-12, basinW+100, 8, '#cdc4ae');
   rect(basinX-40, basinY+basinH+40, 10, 190, '#d8d0bc');
   rect(basinX+basinW+30, basinY+basinH+40, 10, 190, '#d8d0bc');
-  rect(basinX-22, basinY-20, basinW+44, 30, '#c3cbcf');
+  rect(basinX-22, basinY-20, basinW+44+190, 30, '#c3cbcf');   // бортик продлён вправо — на нём сидит кошка
   rect(basinX, basinY, basinW, basinH, '#dde4e7');
   rect(basinX+18, basinY+basinH-26, basinW-36, 16, '#c3cbcf');
   circle(sinkCX, basinY+basinH-18, 11, '#8b9498');
@@ -1330,53 +1688,320 @@ function renderWin(){
   circle(tapBaseX-16, tapBaseY-40, 7, '#3f7fd6');
   const spoutX = tapBaseX + 66, spoutY = tapBaseY - 54;
 
-  // ==== крупная Буся сидит под краном и пьёт ====
-  const bob = Math.sin(winTimer*0.12) * 3;
-  const scale = 2.7;
-  const feetX = spoutX + 35;
-  const feetY = basinY + basinH - 20 + bob;
-  const headTopY = feetY - player.h*scale;
-  ctx.save();
-  ctx.translate(feetX, feetY);
-  ctx.scale(scale, scale);
-  drawCat(-player.w/2, -player.h, -1, Math.floor(winTimer/10)%2, false, false);
-  ctx.restore();
+  // ==== Буся сидит на краю раковины и пьёт воду из-под крана ====
+  const rimY = basinY - 20;                    // верх бортика раковины
+  const mouthY = drawDrinkingCat(spoutX, rimY, winTimer);
 
-  // струя воды из крана прямо в мордочку кошке
-  const mouthY = headTopY + player.h*scale*0.32;
-  rect(spoutX-3, spoutY, 6, Math.max(4, mouthY-spoutY), '#6fb8e6');
-  rect(spoutX-1, spoutY, 2, Math.max(4, mouthY-spoutY), '#bfe6ff');
-  if(winTimer % 12 < 6){
-    circle(spoutX, mouthY+4, 5, '#6fb8e6');
-    circle(spoutX-8, mouthY+14, 3, '#8fc3f2');
-  } else {
-    circle(spoutX+7, mouthY+10, 3, '#8fc3f2');
+  // струя воды из крана: тонкая, слегка «дрожит», обрывается на языке кошки
+  const wob = Math.sin(winTimer*0.7) * 0.8;
+  const streamLen = Math.max(4, mouthY - spoutY);
+  rect(spoutX-3+wob*0.3, spoutY, 6, streamLen, '#6fb8e6');
+  rect(spoutX-1+wob*0.3, spoutY, 2, streamLen, '#dff4ff');
+  // брызги вокруг языка
+  const sp = winTimer % 16;
+  circle(spoutX-8-sp*0.3, mouthY-2-Math.sin(sp/16*Math.PI)*8, 2.2, '#bfe6ff');
+  circle(spoutX+8+sp*0.3, mouthY-2-Math.sin(sp/16*Math.PI)*6, 1.8, '#bfe6ff');
+  // капли, стекающие с подбородка в раковину
+  for(let i=0;i<3;i++){
+    const ph = ((winTimer*1.6 + i*11) % 34);
+    circle(spoutX-2+i*3, mouthY+8+ph, 2, '#8fc3f2');
   }
+  // рябь на воде в раковине
+  ctx.save();
+  ctx.strokeStyle = 'rgba(111,184,230,.7)';
+  ctx.lineWidth = 2;
+  for(let i=0;i<2;i++){
+    const r = ((winTimer*0.8 + i*20) % 40);
+    ctx.globalAlpha = 1 - r/40;
+    ctx.beginPath();
+    ctx.ellipse(spoutX-4, basinY+basinH-40, 8+r, 3+r*0.25, 0, 0, Math.PI*2);
+    ctx.stroke();
+  }
+  ctx.restore();
   circle(sinkCX-40, basinY+basinH-40, 3, '#bfe6ff');
   circle(sinkCX+60, basinY+basinH-30, 2, '#bfe6ff');
 
   // ==== текст ====
-  rect(0, 0, W, 56, 'rgba(20,16,8,0.28)');
+  rect(0, 0, W, 78, 'rgba(20,16,8,0.4)');
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#fdf6e3';
-  ctx.font = 'bold 30px "Courier New", monospace';
-  ctx.fillText('МЯУ! ДОМА ХОРОШО', W/2, 36);
+  outlineText('МЯУ! ДОМА ХОРОШО', W/2, 56, 'bold 50px "Courier New", monospace', '#fdf6e3', '#2a1c0c', 8);
 
-  rect(W/2-300, 440, 600, 46, 'rgba(20,16,8,0.3)');
+  rect(30, 436, W-60, 96, 'rgba(20,16,8,0.62)');
   ctx.fillStyle = '#fdf6e3';
-  ctx.font = '16px "Courier New", monospace';
-  ctx.fillText('Буся добралась до раковины и пьёт воду из-под крана', W/2, 462);
-  ctx.font = 'bold 18px "Courier New", monospace';
+  ctx.font = 'bold 25px "Courier New", monospace';
+  ctx.fillText('Буся добралась домой и пьёт воду', W/2, 472);
+  ctx.font = 'bold 34px "Courier New", monospace';
   ctx.fillStyle = '#ffd23f';
-  ctx.fillText('СЧЁТ: ' + score, W/2, 483);
+  ctx.fillText('СЧЁТ: ' + score, W/2, 516);
 
   if(Math.floor(winTimer/24)%2===0){
-    rect(W/2-200, 552, 400, 30, 'rgba(20,16,8,0.35)');
+    rect(W/2-290, 546, 580, 46, 'rgba(20,16,8,0.62)');
     ctx.fillStyle = '#ff8a3d';
-    ctx.font = 'bold 18px "Courier New", monospace';
-    ctx.fillText('ENTER или ↑ — ИГРАТЬ СНОВА', W/2, 573);
+    ctx.font = 'bold 32px "Courier New", monospace';
+    ctx.fillText('ENTER или ↑ — ИГРАТЬ СНОВА', W/2, 580);
   }
   ctx.textAlign = 'left';
+}
+
+// Скруглённый прямоугольник без ctx.roundRect (его нет в старых браузерах).
+function rrectPath(x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+}
+
+// Кошка сидит на бортике раковины боком (мордой влево), вытянув шею к струе
+// и лакая воду: голова покачивается, язык двигается, хвост виляет, ухо
+// подёргивается. Носик у струи находится ровно в точке (spoutX, возвращаемое y).
+// Рисуется векторно — с градиентами, полосками и шерстью — заметно детальнее
+// пиксельного спрайта из игры.
+const CAT_SCALE = 1.3;
+
+// Кошка в финале рисуется в маленький буфер, затем пикселизуется: крупные
+// «пиксели» по 3px, чёткий силуэт без полупрозрачных краёв и слегка
+// ограниченная палитра — ощущение 8-бит, но с сохранением плавных форм.
+const CAT_PX = 3;
+const CAT_BOX = {dx:-90, dy:-165, w:380, h:190};   // область буфера относительно (sx, rimY)
+let catBuf = null, catBufCtx = null;
+function drawDrinkingCat(sx, rimY, t){
+  const bx = sx + CAT_BOX.dx, by = rimY + CAT_BOX.dy;
+  if(!catBuf){
+    catBuf = document.createElement('canvas');
+    catBuf.width = Math.ceil(CAT_BOX.w / CAT_PX);
+    catBuf.height = Math.ceil(CAT_BOX.h / CAT_PX);
+    catBufCtx = catBuf.getContext('2d');
+  }
+  const mainCtx = ctx;
+  catBufCtx.setTransform(1,0,0,1,0,0);
+  catBufCtx.clearRect(0, 0, catBuf.width, catBuf.height);
+  catBufCtx.scale(1/CAT_PX, 1/CAT_PX);
+  catBufCtx.translate(-bx, -by);
+  let mouthY;
+  ctx = catBufCtx;
+  try{ mouthY = drawDrinkingCatVector(sx, rimY, t); }
+  finally{ ctx = mainCtx; }
+
+  // чёткий силуэт и ограниченная палитра
+  catBufCtx.setTransform(1,0,0,1,0,0);
+  const img = catBufCtx.getImageData(0, 0, catBuf.width, catBuf.height);
+  const d = img.data;
+  for(let i=0; i<d.length; i+=4){
+    if(d[i+3] < 110){ d[i+3] = 0; continue; }
+    d[i+3] = 255;
+    d[i]   = Math.min(255, Math.round(d[i]   / 34) * 34);
+    d[i+1] = Math.min(255, Math.round(d[i+1] / 34) * 34);
+    d[i+2] = Math.min(255, Math.round(d[i+2] / 34) * 34);
+  }
+  catBufCtx.putImageData(img, 0, 0);
+
+  mainCtx.save();
+  mainCtx.imageSmoothingEnabled = false;
+  mainCtx.drawImage(catBuf, 0, 0, catBuf.width, catBuf.height, bx, by, catBuf.width*CAT_PX, catBuf.height*CAT_PX);
+  mainCtx.restore();
+  return mouthY;
+}
+
+function drawDrinkingCatVector(sx, rimY, t){
+  ctx.save();
+  ctx.translate(sx, rimY); ctx.scale(CAT_SCALE, CAT_SCALE); ctx.translate(-sx, -rimY);
+  const lap = Math.sin(t*0.45);                 // ритм лакания
+  const headDy = lap * 1.6;                     // голова чуть опускается/поднимается
+  const breath = Math.sin(t*0.08) * 1.2;        // дыхание
+  const sway = Math.sin(t*0.06);                // покачивание хвоста
+  const earTw = (t % 150) < 8 ? -3 : 0;         // редкое подёргивание уха
+
+  const fur = '#9a9d9f', furDark = '#5f6367', furLight = '#c4c7c8';
+  const cream = '#ecebe4', pink = '#f0a0ac', ink = '#2a2124';
+
+  function furGrad(x0,y0,x1,y1){
+    const g = ctx.createLinearGradient(x0,y0,x1,y1);
+    g.addColorStop(0, furLight); g.addColorStop(0.45, fur); g.addColorStop(1, '#787c80');
+    return g;
+  }
+
+  // тень на бортике под кошкой
+  ctx.fillStyle = 'rgba(40,50,58,.28)';
+  ctx.beginPath(); ctx.ellipse(sx+100, rimY+4, 92, 6, 0, 0, Math.PI*2); ctx.fill();
+
+  // ---- хвост (за телом), свисает с бортика и виляет ----
+  ctx.save();
+  ctx.lineCap = 'round';
+  const tx0 = sx+148, ty0 = rimY-8;
+  const tx1 = sx+196+sway*10, ty1 = rimY-30;
+  const tx2 = sx+186+sway*14, ty2 = rimY-74;
+  function tailPath(){
+    ctx.beginPath();
+    ctx.moveTo(tx0, ty0);
+    ctx.bezierCurveTo(sx+176, rimY+2, tx1, ty1, tx2, ty2);
+  }
+  tailPath(); ctx.strokeStyle = furDark; ctx.lineWidth = 17; ctx.stroke();
+  tailPath(); ctx.strokeStyle = fur; ctx.lineWidth = 13; ctx.stroke();
+  tailPath(); ctx.strokeStyle = furLight; ctx.lineWidth = 3; ctx.stroke();
+  // кольца на хвосте и тёмный кончик
+  ctx.fillStyle = furDark;
+  ctx.beginPath(); ctx.arc(tx2, ty2, 8.5, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // ---- дальняя передняя лапа (тёмнее, за ближней) ----
+  ctx.fillStyle = '#7d8185';
+  rrectPath(sx+84, rimY-30, 17, 30, 7); ctx.fill();
+  ctx.fillStyle = '#cfcfc8';
+  ctx.beginPath(); ctx.ellipse(sx+90, rimY-2, 15, 6, 0, 0, Math.PI*2); ctx.fill();
+
+  // ---- туловище ----
+  const by = breath;
+  function bodyPath(){
+    ctx.beginPath();
+    ctx.moveTo(sx+54, rimY-64);
+    ctx.bezierCurveTo(sx+92, rimY-84+by, sx+150, rimY-76+by, sx+164, rimY-26);
+    ctx.bezierCurveTo(sx+170, rimY-6, sx+160, rimY, sx+144, rimY);
+    ctx.lineTo(sx+66, rimY);
+    ctx.bezierCurveTo(sx+54, rimY-12, sx+50, rimY-44, sx+54, rimY-64);
+    ctx.closePath();
+  }
+  bodyPath();
+  ctx.fillStyle = furGrad(sx+60, rimY-84, sx+150, rimY);
+  ctx.fill();
+  ctx.save();
+  bodyPath(); ctx.clip();
+  // полосы тэбби на спине и боках
+  ctx.strokeStyle = 'rgba(70,74,78,.75)';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 6;
+  for(let i=0;i<6;i++){
+    const px = sx+78 + i*14;
+    ctx.beginPath();
+    ctx.moveTo(px, rimY-80+ (i%2)*2);
+    ctx.quadraticCurveTo(px+6, rimY-58, px-2, rimY-38 - (i%3)*3);
+    ctx.stroke();
+  }
+  // светлая полоса вдоль спины
+  ctx.strokeStyle = 'rgba(255,255,255,.28)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(sx+62, rimY-64);
+  ctx.bezierCurveTo(sx+96, rimY-80+by, sx+146, rimY-72+by, sx+158, rimY-34);
+  ctx.stroke();
+  // кремовая грудка
+  ctx.fillStyle = cream;
+  ctx.beginPath(); ctx.ellipse(sx+62, rimY-24, 11, 24, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // ---- бедро (задняя лапа) и задняя лапка ----
+  ctx.fillStyle = 'rgba(95,99,103,.55)';
+  ctx.beginPath(); ctx.ellipse(sx+128, rimY-26, 33, 27, -0.15, 0, Math.PI*2); ctx.fill();
+  const hg = ctx.createRadialGradient(sx+124, rimY-32, 4, sx+128, rimY-26, 30);
+  hg.addColorStop(0, '#b0b3b5'); hg.addColorStop(1, '#8a8e91');
+  ctx.fillStyle = hg;
+  ctx.beginPath(); ctx.ellipse(sx+127, rimY-27, 30, 24, -0.15, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = 'rgba(60,64,68,.55)'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  for(let i=0;i<3;i++){
+    ctx.beginPath();
+    ctx.moveTo(sx+110+i*12, rimY-44+i);
+    ctx.quadraticCurveTo(sx+114+i*12, rimY-32, sx+108+i*12, rimY-20);
+    ctx.stroke();
+  }
+  ctx.fillStyle = cream;
+  ctx.beginPath(); ctx.ellipse(sx+118, rimY-3, 20, 7, 0, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(sx+112, rimY-3); ctx.lineTo(sx+112, rimY+3);
+  ctx.moveTo(sx+120, rimY-3); ctx.lineTo(sx+120, rimY+3); ctx.stroke();
+
+  // ---- ближняя передняя лапа ----
+  const lg = ctx.createLinearGradient(sx+60, 0, sx+86, 0);
+  lg.addColorStop(0, furLight); lg.addColorStop(1, fur);
+  ctx.fillStyle = lg;
+  rrectPath(sx+62, rimY-38, 21, 38, 8); ctx.fill();
+  ctx.fillStyle = 'rgba(70,74,78,.6)';
+  ctx.fillRect(sx+66, rimY-30, 13, 3);
+  ctx.fillRect(sx+66, rimY-22, 13, 3);
+  ctx.fillStyle = cream;
+  ctx.beginPath(); ctx.ellipse(sx+70, rimY-2, 16, 7, 0, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(sx+64, rimY-3); ctx.lineTo(sx+64, rimY+3);
+  ctx.moveTo(sx+71, rimY-4); ctx.lineTo(sx+71, rimY+3); ctx.stroke();
+
+  // ---- голова (наклонена вниз к струе) ----
+  ctx.save();
+  ctx.translate(0, headDy);
+  const hx = sx+27, hy = rimY-40;               // центр головы
+
+  // дальнее ухо
+  ctx.fillStyle = '#6f7378';
+  ctx.beginPath();
+  ctx.moveTo(hx+8, hy-22); ctx.lineTo(hx+16, hy-46+earTw*0.3); ctx.lineTo(hx+30, hy-22); ctx.closePath(); ctx.fill();
+  // шея
+  ctx.fillStyle = fur;
+  ctx.beginPath();
+  ctx.moveTo(hx+14, hy-18); ctx.lineTo(hx+44, hy-30); ctx.lineTo(hx+46, hy+20); ctx.lineTo(hx+14, hy+18);
+  ctx.closePath(); ctx.fill();
+  // череп
+  const hgr = ctx.createRadialGradient(hx+6, hy-10, 4, hx+10, hy, 36);
+  hgr.addColorStop(0, furLight); hgr.addColorStop(0.6, fur); hgr.addColorStop(1, '#787c80');
+  ctx.fillStyle = hgr;
+  ctx.beginPath(); ctx.ellipse(hx+12, hy, 32, 27, 0.08, 0, Math.PI*2); ctx.fill();
+  // «щёчки» с пушистыми клочками
+  ctx.beginPath();
+  ctx.moveTo(hx+20, hy+14); ctx.lineTo(hx+34, hy+24); ctx.lineTo(hx+34, hy+8); ctx.closePath(); ctx.fill();
+  // ближнее ухо с розовой серединкой
+  ctx.fillStyle = fur;
+  ctx.beginPath();
+  ctx.moveTo(hx+18, hy-24); ctx.lineTo(hx+30, hy-52+earTw); ctx.lineTo(hx+42, hy-20); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = pink;
+  ctx.beginPath();
+  ctx.moveTo(hx+23, hy-24); ctx.lineTo(hx+30, hy-44+earTw); ctx.lineTo(hx+37, hy-23); ctx.closePath(); ctx.fill();
+  // «M» на лбу и полоски у глаза
+  ctx.strokeStyle = 'rgba(60,64,68,.8)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(hx+8, hy-24); ctx.lineTo(hx+10, hy-14);
+  ctx.moveTo(hx+16, hy-25); ctx.lineTo(hx+17, hy-14);
+  ctx.moveTo(hx+24, hy-22); ctx.lineTo(hx+24, hy-13); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(hx+22, hy+1); ctx.lineTo(hx+40, hy-2);
+  ctx.moveTo(hx+22, hy+8); ctx.lineTo(hx+38, hy+8); ctx.stroke();
+
+  // мордочка: кремовая
+  ctx.fillStyle = cream;
+  ctx.beginPath(); ctx.ellipse(hx-14, hy+10, 17, 12, 0.15, 0, Math.PI*2); ctx.fill();
+  // нос — на уровне струи
+  ctx.fillStyle = pink;
+  ctx.beginPath(); ctx.ellipse(hx-28, hy+3, 5, 4, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.7)';
+  ctx.beginPath(); ctx.arc(hx-29, hy+1.5, 1.3, 0, Math.PI*2); ctx.fill();
+  // рот и приоткрытая нижняя челюсть
+  ctx.strokeStyle = ink; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(hx-28, hy+7); ctx.quadraticCurveTo(hx-24, hy+14, hx-14, hy+13); ctx.stroke();
+  // язык лакает: вытягивается вперёд-вниз навстречу струе
+  const tl = 7 + Math.max(0, lap) * 6;
+  ctx.fillStyle = '#e46a86';
+  ctx.beginPath();
+  ctx.ellipse(hx-27, hy+13+tl*0.4, 5, tl*0.55+2, -0.2, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.35)';
+  ctx.fillRect(hx-28, hy+11, 2, tl*0.5);
+  // глаз: довольно прикрыт — тёплая дуга с ресничками и искоркой зелёного
+  ctx.strokeStyle = ink; ctx.lineWidth = 2.6;
+  ctx.beginPath(); ctx.moveTo(hx-4, hy-6); ctx.quadraticCurveTo(hx+6, hy+2, hx+16, hy-6); ctx.stroke();
+  ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(hx+16, hy-6); ctx.lineTo(hx+21, hy-9);
+  ctx.moveTo(hx+12, hy-3); ctx.lineTo(hx+18, hy-4); ctx.stroke();
+  ctx.fillStyle = 'rgba(120,200,120,.55)';
+  ctx.beginPath(); ctx.ellipse(hx+6, hy-3, 5, 1.8, 0, 0, Math.PI); ctx.fill();
+  // усы
+  ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.3;
+  for(let i=0;i<3;i++){
+    ctx.beginPath();
+    ctx.moveTo(hx-16, hy+6+i*3);
+    ctx.quadraticCurveTo(hx-34, hy+3+i*5, hx-46, hy+1+i*8);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // нос кошки (y) для привязки струи воды: у языка
+  ctx.restore();
+  return rimY + (-40 + headDy + 13 + (7 + Math.max(0, lap)*6)*0.4) * CAT_SCALE;
 }
 
 function renderGameOver(){
@@ -1384,15 +2009,15 @@ function renderGameOver(){
   ctx.fillRect(0,0,W,H);
   ctx.textAlign = 'center';
   ctx.fillStyle = '#e0403a';
-  ctx.font = 'bold 36px "Courier New", monospace';
-  ctx.fillText('ИГРА ОКОНЧЕНА', W/2, H/2-40);
+  ctx.font = 'bold 64px "Courier New", monospace';
+  ctx.fillText('ИГРА ОКОНЧЕНА', W/2, H/2-50);
   ctx.fillStyle = '#d8cdb8';
-  ctx.font = '18px "Courier New", monospace';
-  ctx.fillText('СЧЁТ: ' + score, W/2, H/2);
+  ctx.font = 'bold 36px "Courier New", monospace';
+  ctx.fillText('СЧЁТ: ' + score, W/2, H/2+10);
   if(Math.floor(bgAnim/24)%2===0){
     ctx.fillStyle = '#e0c040';
-    ctx.font = 'bold 18px "Courier New", monospace';
-    ctx.fillText('ENTER или ↑ — ПОПРОБОВАТЬ СНОВА', W/2, H/2+50);
+    ctx.font = 'bold 30px "Courier New", monospace';
+    ctx.fillText('ENTER или ↑ — ПОПРОБОВАТЬ СНОВА', W/2, H/2+90);
   }
   ctx.textAlign = 'left';
 }
