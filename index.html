@@ -238,6 +238,13 @@ let ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 const W = canvas.width, H = canvas.height;
 
+// Геометрия кнопок выбора сложности на стартовом экране — общая для отрисовки
+// (renderStart) и для попадания тапа/клика, чтобы область нажатия совпадала
+// с тем, что реально нарисовано.
+const DIFF_BOX_W = 212, DIFF_BOX_H = 58, DIFF_GAP = 18, DIFF_SEL_Y = 246;
+const DIFF_LEFT_X = W/2 - DIFF_BOX_W - DIFF_GAP/2;
+const DIFF_RIGHT_X = W/2 + DIFF_GAP/2;
+
 /* ============================= INPUT =============================
    Стрелки и пробел перехватываются, чтобы не прокручивать страницу. */
 const keys = {};
@@ -259,7 +266,30 @@ window.addEventListener('blur', function(){
   for(const k in keys) keys[k] = false;
 });
 
-canvas.addEventListener('mousedown', function(){ canvas.focus(); unlockAudio(); });
+// Прямое нажатие/тап по кнопкам "ПРОСТО"/"СЛОЖНО" на стартовом экране —
+// мобильные игроки ожидают тыкать пальцем прямо в нарисованную кнопку,
+// а не подбирать сложность стрелками.
+function handleStartTap(clientX, clientY){
+  if(state !== 'START') return;
+  const rect = canvas.getBoundingClientRect();
+  if(rect.width === 0 || rect.height === 0) return;
+  const px = (clientX - rect.left) * (W / rect.width);
+  const py = (clientY - rect.top) * (H / rect.height);
+  if(px >= DIFF_LEFT_X && px <= DIFF_LEFT_X + DIFF_BOX_W && py >= DIFF_SEL_Y && py <= DIFF_SEL_Y + DIFF_BOX_H){
+    if(difficulty !== 'easy'){ difficulty = 'easy'; sfxStep(); }
+  } else if(px >= DIFF_RIGHT_X && px <= DIFF_RIGHT_X + DIFF_BOX_W && py >= DIFF_SEL_Y && py <= DIFF_SEL_Y + DIFF_BOX_H){
+    if(difficulty !== 'hard'){ difficulty = 'hard'; sfxStep(); }
+  }
+}
+canvas.addEventListener('mousedown', function(e){
+  canvas.focus();
+  unlockAudio();
+  handleStartTap(e.clientX, e.clientY);
+});
+canvas.addEventListener('touchstart', function(e){
+  unlockAudio();
+  if(e.touches && e.touches[0]) handleStartTap(e.touches[0].clientX, e.touches[0].clientY);
+}, {passive:true});
 // Safari на iOS игнорирует user-scalable=no — гасим жесты масштабирования вручную.
 ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
   document.addEventListener(ev, function(e){ e.preventDefault(); });
@@ -1637,9 +1667,9 @@ function renderStart(){
   outlineText('SUPER BUSYA', W/2, 150, 'bold 78px "Courier New", monospace', '#fdf6e3', '#1d1a10', 10);
 
   // ==== выбор сложности ====
-  outlineText('← →  СЛОЖНОСТЬ', W/2, 232, 'bold 22px "Courier New", monospace', '#bfe6ff', '#1d1a10', 5);
-  const boxW = 212, boxH = 58, gap = 18, selY = 246;
-  const leftX = W/2 - boxW - gap/2, rightX = W/2 + gap/2;
+  outlineText('СЛОЖНОСТЬ — тапни по кнопке или ← →', W/2, 232, 'bold 22px "Courier New", monospace', '#bfe6ff', '#1d1a10', 5);
+  const boxW = DIFF_BOX_W, boxH = DIFF_BOX_H, selY = DIFF_SEL_Y;
+  const leftX = DIFF_LEFT_X, rightX = DIFF_RIGHT_X;
   function diffBox(bx, label, active){
     rect(bx, selY, boxW, boxH, active ? 'rgba(255,210,63,0.94)' : 'rgba(20,17,13,0.55)');
     ctx.strokeStyle = active ? '#1d1a10' : 'rgba(255,255,255,.55)';
