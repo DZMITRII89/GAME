@@ -222,6 +222,7 @@
   </div>
   <p class="hint">
     <b>← →</b> движение &nbsp; <b>↑ / Пробел</b> прыжок &nbsp; <b>Enter</b> или <b>↑</b> старт / рестарт<br>
+    На стартовом экране <b>← →</b> выбирают сложность: «Просто» (бессмертная Буся) или «Сложно» (1 жизнь).<br>
     На телефоне: виртуальные кнопки ◀ ▶ ▲ — игру запускает кнопка ▲.<br>
     Уровень 1: улица — прыгай по ящикам и машинам, лови мышей, избегай собак.<br>
     Уровень 2: деревья — прыгай по веткам к открытому окну, лови птичек, избегай хищных птиц.
@@ -431,6 +432,7 @@ const MAX_CAM_Y = H - VH;   // нижний край кадра всегда с�
 
 /* ============================= GAME STATE ============================= */
 let state = 'START'; // START | LEVEL1 | LEVEL2 | WIN | GAMEOVER
+let difficulty = 'hard'; // 'easy' | 'hard' — выбирается на стартовом экране (←/→)
 let score = 0;
 let hearts = 1;
 let collected = 0;
@@ -739,11 +741,14 @@ function handleRoadCarContact(e){
 
 function damagePlayer(sourceX){
   if(invTimer > 0) return;
-  hearts -= 1;
   invTimer = INV_TIME;
   sfxHit();
   player.vy = -7;
   player.vx = (player.x + player.w/2 < sourceX) ? -4.5 : 4.5;
+  // В лёгком режиме Буся не получает урон и никогда не проигрывает —
+  // только отскакивает от собаки/хищной птицы (для обратной связи).
+  if(difficulty === 'easy') return;
+  hearts -= 1;
   if(hearts <= 0){
     hearts = 0;
     state = 'GAMEOVER';
@@ -892,6 +897,10 @@ function updateLevel2(){
 let firstGestureConsumed = false;
 function update(){
   if(state === 'START'){
+    if(justPressed('ArrowLeft') || justPressed('ArrowRight')){
+      difficulty = (difficulty === 'hard') ? 'easy' : 'hard';
+      sfxStep();
+    }
     if(!firstGestureConsumed){
       if(audioUnlocked) firstGestureConsumed = true;
     } else if(justPressed('Enter') || justPressed('ArrowUp') || justPressed('Space')){
@@ -1496,8 +1505,15 @@ function renderHUD(levelLabel){
   ctx.save();
   ctx.scale(S, S);
   const HW = W / S;
-  for(let i=0;i<MAX_HEARTS;i++){
-    drawHeart(12 + i*22, 10, i < hearts);
+  if(difficulty === 'easy'){
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 20px "Courier New", monospace';
+    ctx.fillStyle = '#e0403a';
+    ctx.fillText('♥ ∞', 12, 24);
+  } else {
+    for(let i=0;i<MAX_HEARTS;i++){
+      drawHeart(12 + i*22, 10, i < hearts);
+    }
   }
   ctx.textAlign = 'left';
   ctx.font = '12px "Courier New", monospace';
@@ -1619,6 +1635,26 @@ function renderStart(){
 
   ctx.textAlign = 'center';
   outlineText('SUPER BUSYA', W/2, 150, 'bold 78px "Courier New", monospace', '#fdf6e3', '#1d1a10', 10);
+
+  // ==== выбор сложности ====
+  outlineText('← →  СЛОЖНОСТЬ', W/2, 232, 'bold 22px "Courier New", monospace', '#bfe6ff', '#1d1a10', 5);
+  const boxW = 212, boxH = 58, gap = 18, selY = 246;
+  const leftX = W/2 - boxW - gap/2, rightX = W/2 + gap/2;
+  function diffBox(bx, label, active){
+    rect(bx, selY, boxW, boxH, active ? 'rgba(255,210,63,0.94)' : 'rgba(20,17,13,0.55)');
+    ctx.strokeStyle = active ? '#1d1a10' : 'rgba(255,255,255,.55)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(bx+1.5, selY+1.5, boxW-3, boxH-3);
+    ctx.font = 'bold 26px "Courier New", monospace';
+    ctx.fillStyle = active ? '#1d1a10' : '#fdf6e3';
+    ctx.fillText(label, bx+boxW/2, selY+boxH/2+9);
+  }
+  diffBox(leftX, 'ПРОСТО', difficulty === 'easy');
+  diffBox(rightX, 'СЛОЖНО', difficulty !== 'easy');
+  outlineText(
+    difficulty === 'easy' ? 'Буся бессмертна — жизни бесконечны' : 'Как обычно: 1 жизнь, урон от врагов',
+    W/2, selY + boxH + 26, '18px "Courier New", monospace', '#e7dfce', '#1d1a10', 4
+  );
 
   const f = '26px "Courier New", monospace';
   outlineText('← → движение   ↑ / Пробел прыжок', W/2, 420, f, '#fdf6e3', '#1d1a10', 6);
